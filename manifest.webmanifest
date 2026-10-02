@@ -1,0 +1,21 @@
+{
+  "id": "./",
+  "name": "Орбита — учет расходов",
+  "short_name": "Орбита",
+  "description": "Офлайн-трекер расходов по месяцам",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f4f6f9",
+  "theme_color": "#f4f6f9",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f4f6f9">
+  <meta name="description" content="Минималистичный офлайн-трекер расходов по месяцам.">
+  <title>Орбита — расходы</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css?v=1.0.0">
+  <script src="app.js?v=1.0.0" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Орбита — главная">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span class="brand-name">ОРБИТА<small>ЛИЧНЫЕ ФИНАНСЫ</small></span>
+      </a>
+      <button class="theme-toggle icon-button" id="theme-toggle" type="button" aria-label="Включить темную тему" title="Переключить тему">☾</button>
+    </header>
+
+    <main>
+      <section class="month-overview" aria-labelledby="month-total-label">
+        <div class="overview-top">
+          <div>
+            <p class="eyebrow" id="month-total-label">РАСХОДЫ ЗА МЕСЯЦ</p>
+            <h1 class="month-total" id="month-total">0 <span>₽</span></h1>
+          </div>
+          <button class="add-expense button-primary" id="open-expense" type="button"><span aria-hidden="true">＋</span> Внести</button>
+        </div>
+        <div class="month-controls" aria-label="Выбор месяца">
+          <button class="month-arrow icon-button" id="previous-month" type="button" aria-label="Предыдущий месяц" title="Предыдущий месяц">‹</button>
+          <label class="visually-hidden" for="month-picker">Выбранный месяц</label>
+          <input id="month-picker" type="month">
+          <button class="month-arrow icon-button" id="next-month" type="button" aria-label="Следующий месяц" title="Следующий месяц">›</button>
+          <span class="expense-count" id="expense-count">0 операций</span>
+        </div>
+      </section>
+
+      <section class="section-block" aria-labelledby="categories-title">
+        <div class="section-heading"><div><p class="eyebrow">РАСПРЕДЕЛЕНИЕ</p><h2 id="categories-title">Категории</h2></div></div>
+        <div class="category-grid" id="category-list"></div>
+      </section>
+
+      <section class="section-block transactions-section" aria-labelledby="transactions-title">
+        <div class="section-heading"><div><p class="eyebrow">ЖУРНАЛ</p><h2 id="transactions-title">Последние расходы</h2></div><span class="section-meta" id="transactions-meta"></span></div>
+        <div class="transaction-list" id="transaction-list"></div>
+        <div class="empty-state" id="empty-state" hidden><span class="empty-mark" aria-hidden="true">∅</span><p>В этом месяце пока пусто</p><small>Добавьте первый расход</small></div>
+      </section>
+    </main>
+
+    <footer class="data-tools" aria-label="Управление данными">
+      <button class="tool-button" id="export-csv" type="button"><span aria-hidden="true">▤</span><span>Экспорт CSV</span></button>
+      <button class="tool-button" id="export-json" type="button"><span aria-hidden="true">↧</span><span>Экспорт JSON</span></button>
+      <button class="tool-button" id="import-json" type="button"><span aria-hidden="true">↥</span><span>Импорт JSON</span></button>
+      <button class="tool-button tool-danger" id="clear-month" type="button"><span aria-hidden="true">⌫</span><span>Очистить месяц</span></button>
+      <input id="import-file" class="visually-hidden" type="file" accept="application/json,.json" aria-hidden="true" tabindex="-1">
+    </footer>
+    <p class="storage-status" id="storage-status" role="status" aria-live="polite"></p>
+  </div>
+
+  <dialog class="expense-dialog" id="expense-dialog" aria-labelledby="dialog-title">
+    <form class="dialog-form" id="expense-form">
+      <div class="dialog-heading">
+        <div><p class="eyebrow" id="dialog-step-label">ШАГ 1 ИЗ 2</p><h2 id="dialog-title">Новый расход</h2></div>
+        <button class="icon-button dialog-close" id="close-dialog" type="button" aria-label="Закрыть">×</button>
+      </div>
+
+      <section class="entry-step" id="amount-step">
+        <label class="dialog-label" for="expense-date">Дата</label>
+        <input class="date-input" id="expense-date" name="date" type="date" required>
+        <label class="dialog-label amount-label" for="expense-amount">Сумма</label>
+        <div class="amount-field"><input id="expense-amount" name="amount" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="0" required><span>₽</span></div>
+        <button class="button-primary next-button" id="next-step" type="button">Далее <span aria-hidden="true">→</span></button>
+      </section>
+
+      <section class="entry-step category-step" id="category-step" hidden>
+        <p class="dialog-label">Выберите категорию</p>
+        <div class="category-choices" id="category-choices"></div>
+      </section>
+      <p class="dialog-error" id="dialog-error" role="alert"></p>
+    </form>
+  </dialog>
+</body>
+</html>
