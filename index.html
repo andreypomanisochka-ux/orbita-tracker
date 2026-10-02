@@ -8,8 +8,9 @@
   <title>Орбита — расходы</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=1.0.0">
-  <script src="app.js?v=1.0.0" defer></script>
+  <link rel="stylesheet" href="style.css?v=1.1.0">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js" async></script>
+  <script src="app.js?v=1.1.1" defer></script>
 </head>
 <body>
   <div class="app-shell">
@@ -18,6 +19,10 @@
         <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
         <span class="brand-name">ОРБИТА<small>ЛИЧНЫЕ ФИНАНСЫ</small></span>
       </a>
+      <nav class="view-tabs" role="tablist" aria-label="Разделы приложения">
+        <button class="view-tab is-active" id="home-tab" type="button" role="tab" aria-selected="true" aria-controls="home-view" data-view="home">Главная</button>
+        <button class="view-tab" id="analytics-tab" type="button" role="tab" aria-selected="false" aria-controls="analytics-view" data-view="analytics">📊 Аналитика</button>
+      </nav>
       <button class="theme-toggle icon-button" id="theme-toggle" type="button" aria-label="Включить темную тему" title="Переключить тему">☾</button>
     </header>
 
@@ -37,8 +42,14 @@
           <button class="month-arrow icon-button" id="next-month" type="button" aria-label="Следующий месяц" title="Следующий месяц">›</button>
           <span class="expense-count" id="expense-count">0 операций</span>
         </div>
+        <div class="overview-insights" aria-label="Средний расход и изменение к прошлому месяцу">
+          <div class="insight-item"><span>В СРЕДНЕМ ЗА ДЕНЬ</span><strong id="daily-average">0 ₽</strong></div>
+          <div class="insight-divider" aria-hidden="true"></div>
+          <div class="insight-item insight-change"><span>К ПРОШЛОМУ МЕСЯЦУ</span><strong id="month-change">Нет данных</strong></div>
+        </div>
       </section>
 
+      <div class="view-panel is-active" id="home-view" role="tabpanel" aria-labelledby="home-tab">
       <section class="section-block" aria-labelledby="categories-title">
         <div class="section-heading"><div><p class="eyebrow">РАСПРЕДЕЛЕНИЕ</p><h2 id="categories-title">Категории</h2></div></div>
         <div class="category-grid" id="category-list"></div>
@@ -48,6 +59,27 @@
         <div class="section-heading"><div><p class="eyebrow">ЖУРНАЛ</p><h2 id="transactions-title">Последние расходы</h2></div><span class="section-meta" id="transactions-meta"></span></div>
         <div class="transaction-list" id="transaction-list"></div>
         <div class="empty-state" id="empty-state" hidden><span class="empty-mark" aria-hidden="true">∅</span><p>В этом месяце пока пусто</p><small>Добавьте первый расход</small></div>
+      </section>
+      </div>
+
+      <section class="view-panel analytics-view" id="analytics-view" role="tabpanel" aria-labelledby="analytics-tab" hidden>
+        <div class="analytics-heading">
+          <div><p class="eyebrow">ОБЗОР МЕСЯЦА</p><h2 id="analytics-month-title">Аналитика</h2></div>
+          <div class="analysis-insights">
+            <span class="analysis-daily" id="analytics-daily">0 ₽ в день</span>
+            <span class="change-pill" id="analytics-change">Нет данных</span>
+          </div>
+        </div>
+        <div class="analytics-layout">
+          <section class="chart-panel" aria-label="Круговая диаграмма расходов по категориям">
+            <div class="chart-wrap" id="chart-wrap" hidden><canvas id="expense-chart" role="img" aria-label="Круговая диаграмма расходов за выбранный месяц"></canvas></div>
+            <div class="chart-empty" id="chart-empty"><span aria-hidden="true">◌</span><p>Нет расходов за этот месяц</p></div>
+          </section>
+          <section class="legend-panel" aria-labelledby="legend-title">
+            <div class="section-heading"><div><p class="eyebrow">ДОЛИ РАСХОДОВ</p><h2 id="legend-title">По категориям</h2></div></div>
+            <div class="chart-legend" id="chart-legend"></div>
+          </section>
+        </div>
       </section>
     </main>
 

@@ -1,6 +1,8 @@
 const STORAGE_KEY = 'orbita-expenses-by-month-v1';
+const BUDGETS_KEY = 'orbita-expense-budgets-v1';
 const THEME_KEY = 'orbita-expenses-theme-v1';
 const DEFAULT_THEME = 'light';
+const CHART_COLORS = ['#ff6b00', '#0a2540', '#1e88e5', '#64748b', '#12a6b3', '#7995da', '#f39b55', '#49627f', '#db7d45', '#8a98a8'];
 const CATEGORIES = [
   { id: 'groceries', name: 'Продукты', icon: '🛒', color: '#25a879' },
   { id: 'home', name: 'ЖКХ и Дом', icon: '🏠', color: '#4778c7' },
@@ -16,9 +18,14 @@ const CATEGORIES = [
 
 const elements = {
   themeToggle: document.querySelector('#theme-toggle'),
+  homeView: document.querySelector('#home-view'),
+  analyticsView: document.querySelector('#analytics-view'),
+  viewTabs: [...document.querySelectorAll('.view-tab[data-view]')],
   monthPicker: document.querySelector('#month-picker'),
   monthTotal: document.querySelector('#month-total'),
   expenseCount: document.querySelector('#expense-count'),
+  dailyAverage: document.querySelector('#daily-average'),
+  monthChange: document.querySelector('#month-change'),
   categoryList: document.querySelector('#category-list'),
   transactionList: document.querySelector('#transaction-list'),
   transactionsMeta: document.querySelector('#transactions-meta'),
@@ -35,6 +42,13 @@ const elements = {
   dialogError: document.querySelector('#dialog-error'),
   storageStatus: document.querySelector('#storage-status'),
   importFile: document.querySelector('#import-file'),
+  analyticsMonthTitle: document.querySelector('#analytics-month-title'),
+  analyticsDaily: document.querySelector('#analytics-daily'),
+  analyticsChange: document.querySelector('#analytics-change'),
+  chartCanvas: document.querySelector('#expense-chart'),
+  chartWrap: document.querySelector('#chart-wrap'),
+  chartEmpty: document.querySelector('#chart-empty'),
+  chartLegend: document.querySelector('#chart-legend'),
 };
 
 const currencyFormat = new Intl.NumberFormat('ru-RU', {
@@ -48,7 +62,9 @@ const monthFormat = new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'num
 const transactionDateFormat = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', weekday: 'short' });
 
 let expensesByMonth = {};
+let budgetsByMonth = {};
 let selectedMonth = getCurrentMonth();
+let expenseChart = null;
 
 function getTodayKey() {
   const now = new Date();
@@ -143,6 +159,36 @@ function loadExpenses() {
   }
 }
 
+function normalizeBudgets(source) {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return {};
+  const categoryIds = new Set(CATEGORIES.map((category) => category.id));
+  const normalized = {};
+  for (const [month, categoryBudgets] of Object.entries(source)) {
+    if (!isValidMonth(month) || !categoryBudgets || typeof categoryBudgets !== 'object' || Array.isArray(categoryBudgets)) continue;
+    const validBudgets = Object.fromEntries(Object.entries(categoryBudgets).filter(([categoryId, amount]) => (
+      categoryIds.has(categoryId) && Number.isFinite(amount) && amount > 0
+    )));
+    if (Object.keys(validBudgets).length) normalized[month] = validBudgets;
+  }
+  return normalized;
+}
+
+function loadBudgets() {
+  const saved = getSafeStorageValue(BUDGETS_KEY);
+  if (!saved) return {};
+  try {
+    return normalizeBudgets(JSON.parse(saved));
+  } catch {
+    return {};
+  }
+}
+
+function persistBudgets() {
+  const saved = setSafeStorageValue(BUDGETS_KEY, JSON.stringify(budgetsByMonth));
+  if (!saved) elements.storageStatus.textContent = 'Лимит не сохранен: хранилище недоступно';
+  return saved;
+}
+
 function persistExpenses() {
   const saved = setSafeStorageValue(STORAGE_KEY, JSON.stringify(expensesByMonth));
   elements.storageStatus.textContent = saved
@@ -153,6 +199,33 @@ function persistExpenses() {
 
 function getSelectedExpenses() {
   return expensesByMonth[selectedMonth] ?? [];
+}
+
+function getMonthTotal(month) {
+  return (expensesByMonth[month] ?? []).reduce((total, expense) => total + expense.amount, 0);
+}
+
+function getPreviousMonth(month) {
+  const [year, monthIndex] = month.split('-').map(Number);
+  const previous = new Date(year, monthIndex - 2, 1);
+  return `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function getElapsedDays(month) {
+  const [year, monthIndex] = month.split('-').map(Number);
+  const daysInMonth = new Date(year, monthIndex, 0).getDate();
+  if (month === getCurrentMonth()) return new Date().getDate();
+  return month < getCurrentMonth() ? daysInMonth : 0;
+}
+
+function getMonthChange(monthTotal) {
+  const previousTotal = getMonthTotal(getPreviousMonth(selectedMonth));
+  if (previousTotal === 0) return { text: monthTotal > 0 ? 'Новый месяц' : 'Нет данных', direction: 'neutral' };
+  const percent = Math.round(((monthTotal - previousTotal) / previousTotal) * 100);
+  return {
+    text: `${percent > 0 ? '+' : ''}${percent}% к прошлому месяцу`,
+    direction: percent > 0 ? 'up' : percent < 0 ? 'down' : 'neutral',
+  };
 }
 
 function getCategory(categoryId) {
@@ -171,7 +244,7 @@ function setTheme(theme, persist = true) {
   }
 }
 
-function createCategoryCard(category, total, maxTotal) {
+function createCategoryCard(category, total, maxTotal, limit) {
   const card = document.createElement('article');
   card.className = 'category-card';
   card.style.setProperty('--category-color', category.color);
@@ -196,13 +269,50 @@ function createCategoryCard(category, total, maxTotal) {
 
   const progress = document.createElement('div');
   progress.className = 'progress-track';
-  progress.setAttribute('aria-label', `${category.name}: ${Math.round(maxTotal ? total / maxTotal * 100 : 0)}% от максимальной категории`);
+  const ratio = limit > 0 ? total / limit : maxTotal > 0 ? total / maxTotal : 0;
+  const percentage = Math.round(ratio * 100);
+  if (limit > 0) progress.classList.add(ratio >= 1 ? 'is-over-limit' : ratio >= 0.8 ? 'is-near-limit' : 'is-limited');
+  progress.setAttribute('aria-label', limit > 0
+    ? `${category.name}: использовано ${percentage}% лимита ${formatCurrency(limit)}`
+    : `${category.name}: ${percentage}% от максимальной категории`);
   const fill = document.createElement('div');
   fill.className = 'progress-fill';
-  fill.style.setProperty('--progress', `${maxTotal ? Math.max(total ? 3 : 0, total / maxTotal * 100) : 0}%`);
+  fill.style.setProperty('--progress', `${limit > 0 ? Math.min(100, Math.max(total ? 3 : 0, ratio * 100)) : maxTotal ? Math.max(total ? 3 : 0, ratio * 100) : 0}%`);
   progress.append(fill);
-  card.append(top, amount, progress);
+  const budgetLabel = document.createElement('label');
+  budgetLabel.className = 'category-budget';
+  const budgetCaption = document.createElement('span');
+  budgetCaption.textContent = 'Лимит / мес.';
+  const budgetField = document.createElement('span');
+  budgetField.className = 'budget-field';
+  const budgetInput = document.createElement('input');
+  budgetInput.type = 'number';
+  budgetInput.min = '0';
+  budgetInput.step = '100';
+  budgetInput.inputMode = 'decimal';
+  budgetInput.placeholder = 'Без лимита';
+  budgetInput.value = limit > 0 ? String(limit) : '';
+  budgetInput.setAttribute('aria-label', `Месячный лимит: ${category.name}`);
+  budgetInput.addEventListener('change', () => updateCategoryBudget(category.id, budgetInput.value));
+  const budgetCurrency = document.createElement('small');
+  budgetCurrency.textContent = '₽';
+  budgetField.append(budgetInput, budgetCurrency);
+  budgetLabel.append(budgetCaption, budgetField);
+  card.append(top, amount, progress, budgetLabel);
   return card;
+}
+
+function updateCategoryBudget(categoryId, rawAmount) {
+  const amount = Number(rawAmount);
+  budgetsByMonth[selectedMonth] ??= {};
+  if (!rawAmount || !Number.isFinite(amount) || amount <= 0) {
+    delete budgetsByMonth[selectedMonth][categoryId];
+    if (!Object.keys(budgetsByMonth[selectedMonth]).length) delete budgetsByMonth[selectedMonth];
+  } else {
+    budgetsByMonth[selectedMonth][categoryId] = Math.round(amount * 100) / 100;
+  }
+  persistBudgets();
+  render();
 }
 
 function createTransactionRow(expense) {
@@ -236,6 +346,111 @@ function createTransactionRow(expense) {
   return row;
 }
 
+const chartCenterLabel = {
+  id: 'monthTotalCenter',
+  afterDraw(chart, args, options) {
+    const { ctx, chartArea } = chart;
+    if (!chartArea) return;
+    ctx.save();
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text').trim();
+    ctx.font = '650 17px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(options.text, (chartArea.left + chartArea.right) / 2, (chartArea.top + chartArea.bottom) / 2, chartArea.right - chartArea.left - 12);
+    ctx.restore();
+  },
+};
+
+function updateChangeLabel(element, change) {
+  element.textContent = change.text;
+  element.classList.remove('trend-up', 'trend-down', 'trend-neutral');
+  element.classList.add(`trend-${change.direction}`);
+}
+
+function renderAnalytics(categoryTotals, monthTotal, dailyAverage, change) {
+  const monthTitle = formatMonth(selectedMonth);
+  elements.analyticsMonthTitle.textContent = monthTitle;
+  elements.analyticsDaily.textContent = `${formatCurrency(dailyAverage)} в день`;
+  updateChangeLabel(elements.analyticsChange, change);
+
+  const categories = CATEGORIES.map((category) => ({
+    ...category,
+    total: categoryTotals.get(category.id) ?? 0,
+  })).filter((category) => category.total > 0).sort((first, second) => second.total - first.total);
+  elements.chartLegend.replaceChildren(...categories.map((category) => {
+    const row = document.createElement('div');
+    row.className = 'chart-legend-row';
+    const marker = document.createElement('span');
+    marker.className = 'chart-legend-marker';
+    marker.style.backgroundColor = CHART_COLORS[CATEGORIES.findIndex((item) => item.id === category.id) % CHART_COLORS.length];
+    const label = document.createElement('span');
+    label.className = 'chart-legend-category';
+    label.textContent = `${category.icon} ${category.name}`;
+    const share = document.createElement('span');
+    share.className = 'chart-legend-share';
+    share.textContent = `${Math.round(category.total / monthTotal * 100)}%`;
+    const amount = document.createElement('strong');
+    amount.textContent = formatCurrency(category.total);
+    row.append(marker, label, share, amount);
+    return row;
+  }));
+
+  const chartAvailable = typeof window.Chart === 'function';
+  elements.chartWrap.hidden = !monthTotal || !chartAvailable;
+  elements.chartEmpty.hidden = Boolean(monthTotal && chartAvailable);
+  elements.chartEmpty.querySelector('p').textContent = monthTotal && !chartAvailable
+    ? 'Диаграмма недоступна без подключения к сети'
+    : 'Нет расходов за этот месяц';
+
+  if (!monthTotal || !chartAvailable) {
+    expenseChart?.destroy();
+    expenseChart = null;
+    return;
+  }
+
+  const chartData = {
+    labels: categories.map((category) => category.name),
+    datasets: [{
+      data: categories.map((category) => category.total),
+      backgroundColor: categories.map((category) => CHART_COLORS[CATEGORIES.findIndex((item) => item.id === category.id) % CHART_COLORS.length]),
+      borderColor: getComputedStyle(document.documentElement).getPropertyValue('--surface').trim(),
+      borderWidth: 3,
+      hoverOffset: 7,
+      borderRadius: 4,
+      spacing: 2,
+    }],
+  };
+
+  try {
+    if (!expenseChart) {
+      expenseChart = new window.Chart(elements.chartCanvas, {
+        type: 'doughnut',
+        data: chartData,
+        plugins: [chartCenterLabel],
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '72%',
+          plugins: {
+            legend: { display: false },
+            monthTotalCenter: { text: formatCurrency(monthTotal) },
+            tooltip: { callbacks: { label: (context) => ` ${context.label}: ${formatCurrency(context.raw)}` } },
+          },
+          animation: { duration: 360 },
+        },
+      });
+    } else {
+      expenseChart.data = chartData;
+      expenseChart.options.plugins.monthTotalCenter.text = formatCurrency(monthTotal);
+      expenseChart.update();
+    }
+  } catch {
+    elements.chartWrap.hidden = true;
+    elements.chartEmpty.hidden = false;
+    elements.chartEmpty.querySelector('p').textContent = 'Не удалось построить диаграмму';
+  }
+}
+
 function render() {
   const expenses = getSelectedExpenses().slice().sort((first, second) => (
     second.date.localeCompare(first.date) || second.id.localeCompare(first.id)
@@ -246,16 +461,35 @@ function render() {
     return sum + expense.amount;
   }, 0);
   const maxCategoryTotal = Math.max(0, ...totalsByCategory.values());
+  const elapsedDays = getElapsedDays(selectedMonth);
+  const dailyAverage = elapsedDays ? monthTotal / elapsedDays : 0;
+  const change = getMonthChange(monthTotal);
 
   elements.monthPicker.value = selectedMonth;
   elements.monthTotal.replaceChildren(document.createTextNode(amountFormat.format(monthTotal)), Object.assign(document.createElement('span'), { textContent: ' ₽' }));
   elements.expenseCount.textContent = `${expenses.length} ${pluralize(expenses.length, ['операция', 'операции', 'операций'])}`;
+  elements.dailyAverage.textContent = formatCurrency(dailyAverage);
+  updateChangeLabel(elements.monthChange, change);
   elements.categoryList.replaceChildren(...CATEGORIES.map((category) => (
-    createCategoryCard(category, totalsByCategory.get(category.id), maxCategoryTotal)
+    createCategoryCard(category, totalsByCategory.get(category.id), maxCategoryTotal, budgetsByMonth[selectedMonth]?.[category.id] ?? 0)
   )));
   elements.transactionList.replaceChildren(...expenses.slice(0, 12).map(createTransactionRow));
   elements.emptyState.hidden = expenses.length > 0;
   elements.transactionsMeta.textContent = expenses.length > 12 ? `12 из ${expenses.length}` : '';
+  renderAnalytics(totalsByCategory, monthTotal, dailyAverage, change);
+}
+
+function switchView(view) {
+  const showAnalytics = view === 'analytics';
+  elements.homeView.hidden = showAnalytics;
+  elements.analyticsView.hidden = !showAnalytics;
+  for (const tab of elements.viewTabs) {
+    const selected = tab.dataset.view === view;
+    tab.classList.toggle('is-active', selected);
+    tab.setAttribute('aria-selected', String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  }
+  if (showAnalytics) requestAnimationFrame(() => expenseChart?.resize());
 }
 
 function pluralize(number, forms) {
@@ -370,6 +604,7 @@ function exportJson() {
     version: 1,
     exportedAt: new Date().toISOString(),
     months: expensesByMonth,
+    budgets: budgetsByMonth,
   };
   downloadFile(`orbita-backup-${getTodayKey()}.json`, JSON.stringify(backup, null, 2), 'application/json;charset=utf-8');
 }
@@ -378,8 +613,10 @@ async function importJson(file) {
   try {
     const data = JSON.parse(await file.text());
     const incoming = normalizeExpenses(data.months ?? data.expenses ?? data);
+    const incomingBudgets = normalizeBudgets(data.budgets);
     const importedCount = Object.values(incoming).reduce((sum, entries) => sum + entries.length, 0);
-    if (!importedCount) {
+    const importedBudgetsCount = Object.values(incomingBudgets).reduce((sum, budgets) => sum + Object.keys(budgets).length, 0);
+    if (!importedCount && !importedBudgetsCount) {
       elements.storageStatus.textContent = 'В JSON-файле не найдены записи расходов';
       return;
     }
@@ -389,8 +626,12 @@ async function importJson(file) {
       for (const expense of entries) merged.set(expense.id, expense);
       expensesByMonth[month] = [...merged.values()];
     }
+    for (const [month, categoryBudgets] of Object.entries(incomingBudgets)) {
+      budgetsByMonth[month] = { ...budgetsByMonth[month], ...categoryBudgets };
+    }
     persistExpenses();
-    elements.storageStatus.textContent = `Импортировано записей: ${importedCount}`;
+    if (importedBudgetsCount) persistBudgets();
+    elements.storageStatus.textContent = `Импортировано: ${importedCount} записей, ${importedBudgetsCount} лимитов`;
     render();
   } catch {
     elements.storageStatus.textContent = 'Не удалось прочитать JSON-файл';
@@ -398,13 +639,17 @@ async function importJson(file) {
 }
 
 function clearMonth() {
-  if (!getSelectedExpenses().length) {
-    elements.storageStatus.textContent = 'В этом месяце нет расходов';
+  const hasExpenses = getSelectedExpenses().length > 0;
+  const hasBudgets = Object.keys(budgetsByMonth[selectedMonth] ?? {}).length > 0;
+  if (!hasExpenses && !hasBudgets) {
+    elements.storageStatus.textContent = 'В этом месяце нет данных';
     return;
   }
-  if (!window.confirm(`Удалить все расходы за ${formatMonth(selectedMonth)}?`)) return;
+  if (!window.confirm(`Удалить расходы и лимиты за ${formatMonth(selectedMonth)}?`)) return;
   delete expensesByMonth[selectedMonth];
+  delete budgetsByMonth[selectedMonth];
   persistExpenses();
+  persistBudgets();
   render();
 }
 
@@ -428,11 +673,15 @@ function buildCategoryChoices() {
 
 function init() {
   expensesByMonth = loadExpenses();
+  budgetsByMonth = loadBudgets();
   selectedMonth = getCurrentMonth();
   const savedTheme = getSafeStorageValue(THEME_KEY);
   setTheme(savedTheme === 'dark' ? 'dark' : DEFAULT_THEME, false);
   buildCategoryChoices();
   render();
+  window.addEventListener('load', () => {
+    if (window.Chart) render();
+  }, { once: true });
 
   document.querySelector('#open-expense').addEventListener('click', openExpenseDialog);
   document.querySelector('#close-dialog').addEventListener('click', closeExpenseDialog);
@@ -443,7 +692,9 @@ function init() {
   });
   elements.themeToggle.addEventListener('click', () => {
     setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+    expenseChart?.update();
   });
+  for (const tab of elements.viewTabs) tab.addEventListener('click', () => switchView(tab.dataset.view));
   elements.monthPicker.addEventListener('change', () => selectMonth(elements.monthPicker.value));
   document.querySelector('#previous-month').addEventListener('click', () => moveMonth(-1));
   document.querySelector('#next-month').addEventListener('click', () => moveMonth(1));
